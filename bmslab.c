@@ -25,7 +25,7 @@
  * @full_page_bitmap: 64-bit bitmap indicating which pages are fully used
  * @page_slot_bitmaps: 64-bit bitmap array for each page's allocation status
  * @obj_size: size of each object to be allocated
- * @objects_per_page: actual number of objects per page (capped at 64)
+ * @objs_per_page: actual number of objects per page (capped at 64)
  * @base_addr: base address of a contigous range of 64 pages (256 KB)
  *
  * This structure centralizes all metadata to keep each page free of any
@@ -44,7 +44,7 @@ struct bmslab {
 	atomic_uint_fast64_t	full_page_bitmap;
 	atomic_uint_fast64_t	page_slot_bitmaps[MAX_PAGES_PER_SLAB];
 	size_t	obj_size;
-	size_t	objects_per_page;
+	size_t	objs_per_page;
 	void	*base_addr;
 };
 
@@ -107,14 +107,14 @@ static inline size_t get_obj_idx(struct bmslab *slab,
 struct bmslab *bmslab_init(size_t obj_size)
 {
 	struct bmslab *slab;
-	size_t objects_per_page;
+	size_t objs_per_page;
 
 	if (obj_size == 0 || obj_size > PAGE_SIZE)
 		return NULL;
 
-	objects_per_page = PAGE_SIZE / obj_size;
+	objs_per_page = PAGE_SIZE / obj_size;
 
-	if (objects_per_page > MAX_OBJS_PER_PAGE)
+	if (objs_per_page > MAX_OBJS_PER_PAGE)
 		return NULL;
 
 	slab = (struct bmslab *)malloc(sizeof(struct bmslab));
@@ -122,7 +122,7 @@ struct bmslab *bmslab_init(size_t obj_size)
 		return NULL;
 
 	slab->obj_size = obj_size;
-	slab->objects_per_page = objects_per_page;
+	slab->objs_per_page = objs_per_page;
 
 #ifdef _ISOC11_SOURCE
 	slab->base_addr = aligned_alloc(PAGE_SIZE, MAX_PAGES_PER_SLAB * PAGE_SIZE);
@@ -178,7 +178,7 @@ move_next_page:
 	/* Find free slot in the page */
 	for (;;) {
 		bit_idx = __builtin_ctzll(~page_bits);
-		if (bit_idx < 0 || bit_idx >= (int)slab->objects_per_page) {
+		if (bit_idx < 0 || bit_idx >= (int)slab->objs_per_page) {
 			atomic_fetch_or(&slab->full_page_bitmap, 1ULL << page_idx);
 			goto move_next_page;
 		}
@@ -221,7 +221,7 @@ void bmslab_free(struct bmslab *slab, void *ptr)
 		return;
 
 	obj_idx = get_obj_idx(slab, ptr, page_idx);
-	if (obj_idx >= slab->objects_per_page)
+	if (obj_idx >= slab->objs_per_page)
 		return;
 
 	page_slot_mask = (1ULL << obj_idx);
