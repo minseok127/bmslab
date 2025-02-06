@@ -237,7 +237,7 @@ void *bmslab_alloc(struct bmslab *slab)
 			if (atomic_compare_exchange_weak(
 					&slab->bitmaps[page_idx].submap[submap_idx],
 					&oldv, newv)) {
-				slot_idx = submap_idx * 32 + bit_idx;
+				slot_idx = bit_idx * 16 + submap_idx;
 				assert(slot_idx < slab->real_slot_count);
 
 				return (void *)((char *)page_start(slab, page_idx)
