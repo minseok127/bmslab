@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdatomic.h>
@@ -166,8 +167,7 @@ move_next_page:
 
 	/* Find first bit=1 (non-full page) */
 	page_idx = __builtin_ctzll(not_full_page_mask);
-	if (page_idx < 0 || page_idx >= 64)
-		goto move_next_page;
+	assert(page_idx >= 0 && page_idx < 64);
 
 	page_bits = atomic_load(&slab->page_slot_bitmaps[page_idx]);
 	if (page_bits == UINT64_MAX) {
