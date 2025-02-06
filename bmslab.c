@@ -12,6 +12,8 @@
 #define __cacheline_aligned __attribute__((aligned(64)))
 #endif /* __cacheline_aligned */
 
+#define SUBMAP_COUNT	(16)
+
 /*
  * bmslab_bitmap - per-page bitmap
  * @submap: 16 arrays of 32-bit bitmaps (each = 4 bytes)
@@ -22,7 +24,7 @@
  * Total capacity per page = 16 * 32 = 512 slots (max).
  */
 struct bmslab_bitmap {
-	uint32_t submap[16];
+	uint32_t submap[SUBMAP_COUNT];
 } __cacheline_aligned;
 
 /*
@@ -99,14 +101,14 @@ struct bmslab *bmslab_init(int obj_size, int page_count)
 
 	/* Initialize each page's submaps */
 	for (int page_idx = 0; page_idx < page_count; page_idx++) {
-		for (int i = 0; i < 16; i++) {
+		for (int i = 0; i < SUBMAP_COUNT; i++) {
 			atomic_init(&slab->bitmaps[page_idx].submap[i], 0xffffffffU);
 		}
 
 		/* Distribute slots across the submaps */
 		for (int s = 0; s < slab->real_slot_count; s++) {
-			submap_idx = s % 16;
-			bit_idx = s / 16;
+			submap_idx = s % SUBMAP_COUNT;
+			bit_idx = s / SUBMAP_COUNT;
 			
 			mask = ~(1U << bit_idx);
 			oldv = atomic_load(&slab->bitmaps[page_idx].submap[submap_idx]);
@@ -219,10 +221,10 @@ void *bmslab_alloc(struct bmslab *slab)
 	
 	for (int i = 0; i < slab->page_count; i++) {
 		page_idx = (page_start_idx + i) % slab->page_count;
-		submap_start_idx = murmurhash32(&sp, sizeof(sp), 1) % 16;
+		submap_start_idx = murmurhash32(&sp, sizeof(sp), 1) % SUBMAP_COUNT;
 
-		for (int sub_i = 0; sub_i < 16; sub_i++) {
-			submap_idx = (submap_start_idx + sub_i) % 16;
+		for (int sub_i = 0; sub_i < SUBMAP_COUNT; sub_i++) {
+			submap_idx = (submap_start_idx + sub_i) % SUBMAP_COUNT;
 			oldv = atomic_load(&slab->bitmaps[page_idx].submap[submap_idx]);
 
 			/* Move to the next submap */
@@ -237,7 +239,7 @@ void *bmslab_alloc(struct bmslab *slab)
 			if (atomic_compare_exchange_weak(
 					&slab->bitmaps[page_idx].submap[submap_idx],
 					&oldv, newv)) {
-				slot_idx = bit_idx * 16 + submap_idx;
+				slot_idx = bit_idx * SUBMAP_COUNT + submap_idx;
 				assert(slot_idx < slab->real_slot_count);
 
 				return (void *)((char *)page_start(slab, page_idx)
@@ -284,8 +286,8 @@ void bmslab_free(struct bmslab *slab, void *ptr)
 	slot_idx = (int)(offset / slab->obj_size);
 	assert(slot_idx < slab->real_slot_count);
 
-	submap_idx = slot_idx / 32;
-	bit_idx = slot_idx % 32;
+	submap_idx = slot_idx % SUBMAP_COUNT;
+	bit_idx = slot_idx / SUBMAP_COUNT;
 
 	atomic_fetch_and(&slab->bitmaps[page_idx].submap[submap_idx],
 		~(1U << bit_idx));
