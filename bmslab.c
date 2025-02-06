@@ -223,7 +223,7 @@ void *bmslab_alloc(struct bmslab *slab)
 	for (int i = 0; i < slab->page_count; i++) {
 		page_idx = (page_start_idx + i) % slab->page_count;
 
-		/* Distribute the addresses where CAS will be used */
+		/* Distribute the addresses within the cahce line */
 		submap_start_idx = murmurhash32(&sp, sizeof(sp), 1) % SUBMAP_COUNT;
 
 		for (int sub_i = 0; sub_i < SUBMAP_COUNT; sub_i++) {
