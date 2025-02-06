@@ -37,7 +37,7 @@
  * ->full_page_bitmap marks fully occupied pages (bit 1=full). Setting a bit
  * indicates a page is full, clearing it means the page has available slots.
  *
- * ->page_slot_bitmaps consists of 64 bitmaps, each tracking up to 64 objeect
+ * ->page_slot_bitmaps consists of 64 bitmaps, each tracking up to 64 object
  * slots per page (bit 1=used).
  */
 struct bmslab {
