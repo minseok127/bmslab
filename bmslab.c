@@ -102,7 +102,8 @@ static inline size_t get_obj_idx(struct bmslab *slab,
  * @obj_size: size of each object to be managed
  * 
  * Sets up the slab metadata but does not immediately allocate physical pages.
- * We do not embed headers in each page, so tracking bits are kept in this data.
+ * We do not embed headers in each page, so tracking bits are kept in the
+ * inside of struct bmslab.
  */
 struct bmslab *bmslab_init(size_t obj_size)
 {
