@@ -6,6 +6,6 @@ typedef struct bmslab bmslab_t;
 bmslab_t *bmslab_init(size_t obj_size);
 void *bmslab_alloc(bmslab_t *slab);
 void bmslab_free(bmslab_t *slab, void *ptr);
-void bmslab_destory(bmslab_t *slab);
+void bmslab_destroy(bmslab_t *slab);
 
 #endif /* BMSLAB_H */

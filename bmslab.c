@@ -41,8 +41,8 @@
  * slots per page (bit 1=used).
  */
 struct bmslab {
-	atomic_unit_fast64_t	full_page_bitmap;
-	atomic_unit_fast64_t	page_slot_bitmaps[MAX_PAGES_PER_SLAB];
+	atomic_uint_fast64_t	full_page_bitmap;
+	atomic_uint_fast64_t	page_slot_bitmaps[MAX_PAGES_PER_SLAB];
 	size_t	obj_size;
 	size_t	objects_per_page;
 	void	*base_addr;
@@ -55,7 +55,7 @@ struct bmslab {
  */
 static inline void *get_page_start_addr(struct bmslab *slab, size_t page_idx)
 {
-	return (void *)((char *)slab->base_addr + page_idx << PAGE_SHIFT);
+	return (void *)((char *)slab->base_addr + (page_idx << PAGE_SHIFT));
 }
 
 /*
@@ -68,7 +68,7 @@ static inline void *get_obj_addr(struct bmslab *slab,
 	size_t page_idx, size_t obj_idx)
 {
 	return (void *)((char *)get_page_start_addr(slab, page_idx)
-		+ obj_index * slab->obj_size);
+		+ obj_idx * slab->obj_size);
 }
 
 /*
@@ -109,7 +109,7 @@ struct bmslab *bmslab_init(size_t obj_size)
 	struct bmslat_t *slab;
 	size_t objects_per_page;
 
-	if (obj_isze == 0 || obj_size > PAGE_SIZE)
+	if (obj_size == 0 || obj_size > PAGE_SIZE)
 		return NULL;
 
 	objects_per_page = PAGE_SIZE / obj_size;
@@ -117,7 +117,7 @@ struct bmslab *bmslab_init(size_t obj_size)
 	if (objects_per_page > MAX_OBJS_PER_PAGE)
 		return NULL;
 
-	slab = (struct bmslab *)malloc(sizeof(struct bmslab_t));
+	slab = (struct bmslab *)malloc(sizeof(struct bmslab));
 	if (slab == NULL)
 		return NULL;
 
@@ -233,10 +233,10 @@ void bmslab_free(struct bmslab *slab, void *ptr)
 }
 
 /*
- * bmslab_destory - Release the slab and its 64-page allocation
+ * bmslab_destroy - Release the slab and its 64-page allocation
  * @slab: pointer tl bmslab structure
  */
-void bmslab_destory(struct bmslab *slab)
+void bmslab_destroy(struct bmslab *slab)
 {
 	if (slab == NULL)
 		return;
