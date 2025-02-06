@@ -21,7 +21,7 @@
 #define MAX_OBJS_PER_PAGE	(64)
 
 /*
- * struct bmslab_t - Metadata for managing 64 pages of objects
+ * struct bmslab - Metadata for managing 64 pages of objects
  * @full_page_bitmap: 64-bit bitmap indicating which pages are fully used
  * @page_slot_bitmaps: 64-bit bitmap array for each page's allocation status
  * @obj_size: size of each object to be allocated
@@ -40,7 +40,7 @@
  * ->page_slot_bitmaps consists of 64 bitmaps, each tracking up to 64 objeect
  * slots per page (bit 1=used).
  */
-struct bmslab_t {
+struct bmslab {
 	atomic_unit_fast64_t	full_page_bitmap;
 	atomic_unit_fast64_t	page_slot_bitmaps[MAX_PAGES_PER_SLAB];
 	size_t	obj_size;
@@ -53,7 +53,7 @@ struct bmslab_t {
  * @slab: pointer to bmslab structure containing the base address
  * @page_idx: index of the page (0 to 63)
  */
-static inline void *get_page_start_addr(struct bmslab_t *slab, size_t page_idx)
+static inline void *get_page_start_addr(struct bmslab *slab, size_t page_idx)
 {
 	return (void *)((char *)slab->base_addr + page_idx << PAGE_SHIFT);
 }
@@ -64,7 +64,7 @@ static inline void *get_page_start_addr(struct bmslab_t *slab, size_t page_idx)
  * @page_idx: index of the page
  * @obj_idx: index of the object in the given page
  */
-static inline void *get_obj_addr(struct bmslab_t *slab,
+static inline void *get_obj_addr(struct bmslab *slab,
 	size_t page_idx, size_t obj_idx)
 {
 	return (void *)((char *)get_page_start_addr(slab, page_idx)
@@ -76,7 +76,7 @@ static inline void *get_obj_addr(struct bmslab_t *slab,
  * @slab: pointer to bmslab structure for slab->base_addr
  * @ptr: the object pointer whose page index is needed
  */
-static inline size_t get_page_idx(struct bmslab_t *slab, void *ptr)
+static inline size_t get_page_idx(struct bmslab *slab, void *ptr)
 {
 	uintptr_t base = (uintptr_t)slab->base_addr;
 	uintptr_t diff = (uintptr_t)ptr - base;
@@ -89,7 +89,7 @@ static inline size_t get_page_idx(struct bmslab_t *slab, void *ptr)
  * @ptr: the object pointer whose slot index is needed
  * @page_idx: the page index where ptr resides
  */
-static inline size_t get_obj_idx(struct bmslab_t *slab,
+static inline size_t get_obj_idx(struct bmslab *slab,
 	void *ptr, size_t page_idx)
 {
 	uintptr_t start = (uintptr_t)get_page_start_addr(slab, page_idx);
@@ -104,7 +104,7 @@ static inline size_t get_obj_idx(struct bmslab_t *slab,
  * Sets up the slab metadata but does not immediately allocate physical pages.
  * We do not embed headers in each page, so tracking bits are kept in this data.
  */
-struct bmslat_t *bmslab_init(size_t obj_size)
+struct bmslab *bmslab_init(size_t obj_size)
 {
 	struct bmslat_t *slab;
 	size_t objects_per_page;
@@ -117,7 +117,7 @@ struct bmslat_t *bmslab_init(size_t obj_size)
 	if (objects_per_page > MAX_OBJS_PER_PAGE)
 		return NULL;
 
-	slab = (struct bmslab_t *)malloc(sizeof(struct bmslab_t));
+	slab = (struct bmslab *)malloc(sizeof(struct bmslab_t));
 	if (slab == NULL)
 		return NULL;
 
@@ -152,7 +152,7 @@ struct bmslat_t *bmslab_init(size_t obj_size)
  *
  * Return NULL if all pages are currently full.
  */
-void *bmslab_alloc(struct bmslab_t *slab)
+void *bmslab_alloc(struct bmslab *slab)
 {
 	uint64_t full_page_mask, not_full_page_mask;
 	int page_idx, bit_idx;
@@ -208,7 +208,7 @@ move_next_page:
  * slab->page_slot_bitmaps[page_idx], and if the page was fully used, clears its
  * bit in slab->full_page_bitmap.
  */
-void bmslab_free(struct bmslab_t *slab, void *ptr)
+void bmslab_free(struct bmslab *slab, void *ptr)
 {
 	size_t page_idx, obj_idx;
 	uint64_t page_slot_mask;
@@ -230,4 +230,17 @@ void bmslab_free(struct bmslab_t *slab, void *ptr)
 	if (atomic_load(&slab->full_page_bitmap) & (1ULL << page_idx)) {
 		atomic_fetch_and(&slab->full_page_bitmap, ~(1ULL << page_idx));
 	}
+}
+
+/*
+ * bmslab_destory - Release the slab and its 64-page allocation
+ * @slab: pointer tl bmslab structure
+ */
+void bmslab_destory(struct bmslab *slab)
+{
+	if (slab == NULL)
+		return;
+
+	free(slab->base_addr);
+	free(slab);
 }
