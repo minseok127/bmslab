@@ -34,15 +34,15 @@
  * A single bmslab allocation reserves 64 pages (256 KB) of virtual memory, with
  * the OS lazily allocating physical pages on demand.
  *
- * ->full_page_bitmap marks fully occupied pags (bit=1). Setting a bit indicates
- * a page is full, clearing it means the page has availalbe slots.
+ * ->full_page_bitmap marks fully occupied pages (bit 1=full). Setting a bit
+ * indicates a page is full, clearing it means the page has available slots.
  *
  * ->page_slot_bitmaps consists of 64 bitmaps, each tracking up to 64 objeect
- * slots per page (1=used).
+ * slots per page (bit 1=used).
  */
 struct bmslab_t {
 	atomic_unit_fast64_t	full_page_bitmap;
-	atomic_unit_fast64_t	page_slot_bitmaps[64];
+	atomic_unit_fast64_t	page_slot_bitmaps[MAX_PAGES_PER_SLAB];
 	size_t	obj_size;
 	size_t	objects_per_page;
 	void	*base_addr;
