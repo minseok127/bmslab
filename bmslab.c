@@ -10,7 +10,7 @@
  *
  * Until now, 
  *
- * The maximum number of pages per bmslat_t is 64. Because we manage pages per
+ * The maximum number of pages per bmslab is 64. Because we manage pages per
  * slab using a single 64-bit word.
  *
  * The maximum nubmer of objects per page is 64. Because we manage slots per
