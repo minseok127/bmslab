@@ -36,12 +36,12 @@ struct bmslab_bitmap {
  * @bitmaps: array of bmslab_bitmap, each describing one page's submaps
  */
 struct bmslab {
-	int page_count;
-	int obj_size;
-	int real_slot_count;
+	int32_t page_count;
+	int16_t obj_size;
+	int16_t real_slot_count;
 	void *base_addr;
 	struct bmslab_bitmap *bitmaps;
-} __cacheline_aligned;
+};
 
 /*
  * bmslab_init - initializes a bmslab
