@@ -148,8 +148,8 @@ struct bmslab *bmslab_init(size_t obj_size)
  * bmslab_alloc - Allocates one object from any not-full page
  * @slab: pointer to bmslab structure
  *
- * Marks the corresponding bit in the slab->page_slot_bitmaps[i] as used. If a
- * page becomes fully used, set its bit in slot->full_page_bitmap.
+ * Marks the corresponding bit in the slab->page_slot_bitmaps[page_idx] as used.
+ * If the page becomes fully used, set its bit in slot->full_page_bitmap.
  *
  * Return NULL if all pages are currently full.
  */
