@@ -106,7 +106,7 @@ static inline size_t get_obj_idx(struct bmslab *slab,
  */
 struct bmslab *bmslab_init(size_t obj_size)
 {
-	struct bmslat_t *slab;
+	struct bmslab *slab;
 	size_t objects_per_page;
 
 	if (obj_size == 0 || obj_size > PAGE_SIZE)
