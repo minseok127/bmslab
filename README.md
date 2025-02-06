@@ -1,7 +1,7 @@
 ## bmslab: bitmap based slab allocator
 
-- lock-Free allocation
-- wait-Free deallocation
+- lock-free allocation
+- wait-free deallocation
 - cache Line distribution via hashing:
 
 ## usage
