@@ -1,308 +1,297 @@
-#include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include <stdatomic.h>
+#include <assert.h>
 
 #define PAGE_SIZE	(4096)
 #define PAGE_SHIFT	(12)
 
-/*
- * The maximum number of pages per bmslab is 64. Because we manage pages per
- * slab using a single 64-bit word.
- */
-#define MAX_PAGES_PER_SLAB	(64)
+#ifndef __cacheline_aligned
+#define __cacheline_aligned __attribute__((aligned(64)))
+#endif /* __cacheline_aligned */
 
 /*
- * Each page has 8 words (512 bits) to manage its slots. So the maximum number
- * of objects per page is 512.
+ * bmslab_bitmap - per-page bitmap
+ * @submap: 16 arrays of 32-bit bitmaps (each = 4 bytes)
+ *
+ * Each page has 16 submaps, each submap covers 32 slots
+ * (bit=0 => free, bit=1 => used).
+ *
+ * Total capacity per page = 16 * 32 = 512 slots (max).
  */
-#define NUM_SUB_BITMAPS	(8)
+struct bmslab_bitmap {
+	uint32_t submap[16];
+} __cacheline_aligned;
 
 /*
- * struct bmslab - Metadata for managing 64 pages of objects
- * @full_page_bitmap: 64-bit bitmap indicating which pages are fully used
- * @page_slot_bitmaps: page_slot_bitmaps[page][0..num_submpas-1]
- * @usage[page]: how many slots are used in that page
- * @obj_size: size of each object to be allocated
- * @num_submaps: how many 64-bit sub-bitmaps we actually use (1..8)
- * @max_slots: how many slots each page actually holds (<= num_submaps*64)
- * @base_addr: base address of a contigous range of 64 pages (256 KB)
- *
- * This structure centralizes all metadata to keep each page free of any
- * headers, containing only object data.
- *
- * A single bmslab allocation reserves 64 pages (256 KB) of virtual memory, with
- * the OS lazily allocating physical pages on demand.
+ * bmslab - top-level structure
+ * @page_count: number of pages
+ * @obj_size: size of each object
+ * @real_slot_count: number of valid slots per page
+ * @base_addr: base address of the contiguos pages
+ * @bitmaps: array of bmslab_bitmap, each describing one page's submaps
  */
 struct bmslab {
-	atomic_uint_fast64_t full_page_bitmap;
-	atomic_uint_fast64_t page_slot_bitmaps[MAX_PAGES_PER_SLAB][MAX_SUB_BITMAPS];
-	atomic_size_t usage[MAX_PAGES_PER_SLAB];
-	size_t obj_size;
-	size_t num_submaps;
-	size_t max_slots;
+	int page_count;
+	int obj_size;
+	int real_slot_count;
 	void *base_addr;
-};
+	struct bmslab_bitmap *bitmaps;
+} __cacheline_aligned;
 
 /*
- * get_page_start_addr - Calculates the start address of the given page index
- * @slab: pointer to bmslab structure containing the base address
- * @page_idx: index of the page (0 to 63)
+ * bmslab_init - initializes a bmslab
+ * @obj_size: size of each object (must be >= 8 and <= PAGE_SIZE)
+ * @page_count: number of pages to allocate
+ *
+ * Returns pointer to a bmslab on sucess, or NULL on failure.
+ *
+ * We compute how many slots actually fit (PAGE_SIZE / obj_siz), capped at 512.
+ * Then we mark only those bits as 0 => free, the rest as 1 => unused for simple
+ * exception handling.
  */
-static inline void *get_page_start_addr(struct bmslab *slab, size_t page_idx)
+struct bmslab *bmslab_init(int obj_size, int page_count)
 {
-	return (void *)((char *)slab->base_addr + (page_idx << PAGE_SHIFT));
-}
-
-/*
- * get_obj_addr - Calculates the address of a specific object in a page
- * @slab: pointer to bmslab structure for base address and obj_size
- * @page_idx: index of the page
- * @obj_idx: index of the object in the given page
- */
-static inline void *get_obj_addr(struct bmslab *slab,
-	size_t page_idx, size_t obj_idx)
-{
-	return (void *)((char *)get_page_start_addr(slab, page_idx)
-		+ obj_idx * slab->obj_size);
-}
-
-/*
- * get_page_idx - Calculates which page index a pointer belongs to
- * @slab: pointer to bmslab structure for slab->base_addr
- * @ptr: the object pointer whose page index is needed
- */
-static inline size_t get_page_idx(struct bmslab *slab, void *ptr)
-{
-	uintptr_t base = (uintptr_t)slab->base_addr;
-	uintptr_t diff = (uintptr_t)ptr - base;
-	return diff >> PAGE_SHIFT;
-}
-
-/*
- * get_obj_idx - Calculates the index of an object within its page
- * @slab: pointer to bmslab structure for page_start_addr calculation
- * @ptr: the object pointer whose slot index is needed
- * @page_idx: the page index where ptr resides
- */
-static inline size_t get_obj_idx(struct bmslab *slab,
-	void *ptr, size_t page_idx)
-{
-	uintptr_t start = (uintptr_t)get_page_start_addr(slab, page_idx);
-	size_t offset = (uintptr_t)ptr - start;
-	return offset / slab->obj_size;
-}
-
-/*
- * bmslab_init - Allocates a contiguous block of 64 pages for objects
- * @obj_size: size of each object to be managed
- * 
- * Sets up the slab metadata but does not immediately allocate physical pages.
- * We do not embed headers in each page, so tracking bits are kept in the
- * inside of struct bmslab.
- */
-struct bmslab *bmslab_init(size_t obj_size)
-{
+	int submap_idx, bit_idx;
+	uint32_t mask, oldv;
 	struct bmslab *slab;
-	size_t slots_per_page;
 
-	if (obj_size < 8 || obj_size > PAGE_SIZE)
+	if (obj_size < 8 || obj_size > PAGE_SIZE) {
+		fprintf(stderr, "bmslab_init: invalid obj_size\n");
 		return NULL;
+	}
 
-	slab = (struct bmslab *)calloc(1, sizeof(struct bmslab));
-	if (slab == NULL)
+	if (page_count == 0) {
+		fprintf(stderr, "bmslab_init: invalid page_count\n");
 		return NULL;
+	}
 
+	slab = calloc(1, sizeof(struct bmslab));
+	if (slab == NULL) {
+		fprintf(stderr, "bmslab_init: slab allocation failed\n");
+		return NULL;
+	}
+
+	slab->page_count = page_count;
 	slab->obj_size = obj_size;
+	slab->real_slot_count = PAGE_SIZE / obj_size;
 
 #ifdef _ISOC11_SOURCE
-	slab->base_addr = aligned_alloc(PAGE_SIZE, MAX_PAGES_PER_SLAB * PAGE_SIZE);
+	slab->base_addr = aligned_alloc(PAGE_SIZE, page_count * PAGE_SIZE);
 #else /* !_ISOC11_SOURCE */
 	if (posix_memalign(&slab->base_addr, PAGE_SIZE,
-			MAX_PAGES_PER_SLAB * PAGE_SIZE) != 0) {
+			page_count * PAGE_SIZE) != 0) {
+		fprintf(stderr, "bmslab_init: posix_memalgin failed\n");
 		free(slab);
 		return NULL;
 	}
 #endif /* _ISOC11_SOURCE */
 
-	slots_per_page = PAGE_SIZE / obj_size;
-	assert(slots_per_page <= MAX_SUB_BITMAPS * 64);
-
-	slab->num_submaps = (slots_per_page + 63U) / 64U;
-	assert(slab->num_submaps >= 1);
-
-	if (slab->num_submaps * 64 > slots_per_page) { 
-		slab->max_slots = slots_per_page;
-	} else {
-		slab->max_slots = slab->num_submaps * 64;
+	slab->bitmaps = calloc(page_count, sizeof(struct bmslab_bitmap));
+	if (slab->bitmaps == NULL) {
+		fprintf(stderr, "bmslab_init: slab->bitmap allocation failed\n");
+		free(slab->base_addr);
+		free(slab);
+		return NULL;
 	}
 
-	atomic_init(&slab->full_page_bitmap, 0ULL);
+	/* Initialize each page's submaps */
+	for (int page_idx = 0; page_idx < page_count; page_idx++) {
+		for (int i = 0; i < 16; i++) {
+			atomic_init(&slab->bitmaps[page_idx].submap[i], 0xffffffffU);
+		}
 
-	for (int i = 0; i < MAX_PAGES_PER_SLAB; i++) {
-		atomic_init(&slab->usage[i], 0U);
+		/* Distribute slots across the submaps */
+		for (int s = 0; s < slab->real_slot_count; s++) {
+			submap_idx = s % 16;
+			bit_idx = s / 16;
+			
+			mask = ~(1U << bit_idx);
+			oldv = atomic_load(&slab->bitmaps[page_idx].submap[submap_idx]);
 
-		for (int b = 0; b < MAX_SUB_BITMAPS; b++) {
-			atomic_init(&slab->page_slot_bitmaps[i][b], 0ULL);
+			atomic_store(&slab->bitmaps[page_idx].submap[submap_idx],
+				oldv & mask);
 		}
 	}
 
 	return slab;
 }
 
-
 /*
- * submap_hash - Hashing function to distribute submap
- * @sp: stack pointer
- * @nsub: the number of submap
- */
-static inline size_t submap_hash(void *sp, size_t nsub)
-{
-	uint64_t x = (uint64_t)sp * 114007
-}
-
-/*
- * get_free_page_idx - Searches for a page that is not full
- * @slab: pointer to bmslab structur
- *
- * Return -1 if all pages are full.
- */
-static int get_free_page_idx(struct bmslab *slab)
-{
-	uint64_t full_page_mask, not_full_page_mask;
-	int page_idx;
-
-	full_page_mask = atomic_load(&slab->full_page_bitmap);
-	not_full_page_mask = ~full_page_mask;
-	if (not_full_page_mask == 0ULL)
-		return -1;
-
-	page_idx = __builtin_ctzll(not_full_page_mask);
-	assert(page_idx >= 0 && page_idx < 64);
-
-	if (atomic_load(&slab->usage[page_idx]) >= slab->max_slots) {
-		atomic_fetch_or(&slab->full_page_bitmap, 1ULL << page_idx);
-		return -1;
-	}
-
-	return page_idx;
-}
-
-/*
- * get_free_bit_idx - Searches for a bit index that is not allocated
- * @slab: pointer to bmslab structure
- * @word: target bitmap
- *
- * Return -1 if all slots are allocated.
- */
-static int get_free_bit_idx(struct bmslab *slab, uint64_t word)
-{
-	int bit_idx;
-
-	if (word == UINT64_MAX)
-		return -1;
-
-	bit_idx = __builtin_ctzll(~word);
-	if (bit_idx >= (int)slab->max_slots || bit_idx >= 64)
-		return -1;
-
-	return bit_idx;
-}
-
-/*
- * bmslab_alloc - Allocates one object from any not-full page
- * @slab: pointer to bmslab structure
- *
- * Marks the corresponding bit in the slab->page_slot_bitmaps[page_idx] as used.
- * If the page becomes fully used, set its bit in slot->full_page_bitmap.
- *
- * Return NULL if all pages are currently full.
- */
-void *bmslab_alloc(struct bmslab *slab)
-{
-	int page_idx, bit_idx, slot_idx, map_idx;
-	size_t start_submap_idx, usage;
-	uint64_t old_val, new_val;
-
-	while ((page_idx = get_free_page_idx(slab)) != -1) {
-		start_submap_idx = submap_hash(
-			__builtin_frame_address(0), slab->num_submaps);
-
-		/* Traverse bitmaps using round robin from the random point */
-		for (int i = 0; i < (int)slab->num_submaps; i++) {
-			map_idx = (start_submap_idx + i) % slab->num_submaps;
-			old_val = atomic_load(&slab->page_slot_bitmaps[page_idx][map_idx]);
-
-			bit_idx = get_free_bit_idx(slab, old_val);
-			if (bit_idx == -1)
-				continue;
-
-			new_val = old_val | (1ULL << bit_idx);
-			if (atomic_compare_exchange_weak(
-					&slab->page_slot_bitmaps[page_idx][b] &old_val, new_val)) {
-				usage = 1U + atomic_fetch_add(&slab->usage[page_idx], 1U);
-				if (usage == slab->max_slots) {
-					atomic_fetch_or(&slab->full_page_bitmap, 1ULL << page_idx);
-				}
-				
-				slot_idx = b * 64U + (size_t)bit_idx;
-				return get_obj_addr(slab, page_idx, slot_idx);
-			}
-		}
-
-		/* This page is full */
-		atomic_fetch_or(&slab->full_page_bitmap, 1ULL << page_idx);
-	}
-
-	return NULL;
-}
-
-/*
- * bmslab_free - Frees an object back to the slab
- * @slab: pointer tl bmslab structure
- * @ptr: object pointer to be freed
- *
- * Finds the object slot from the pointer, clears its bit in
- * slab->page_slot_bitmaps[page_idx][submap_idx]. If the page was fully used,
- * clears its bit in slab->full_page_bitmap[page_idx].
- */
-void bmslab_free(struct bmslab *slab, void *ptr)
-{
-	size_t page_idx, obj_idx, submap_idx, bit_idx, old_usage;
-	uint64_t page_slot_mask;
-
-	if (ptr == NULL)
-		return;
-
-	page_idx = get_page_idx(slab, ptr);
-	if (page_idx >= 64)
-		return;
-
-	obj_idx = get_obj_idx(slab, ptr, page_idx);
-	if (obj_idx >= slab->max_slots)
-		return;
-
-	submap_idx = obj_idx / 64;
-	bit_idx = obj_idx % 64;
-
-	atomic_fetch_and(&slab->page_slot_bitmaps[page_idx][submap_idx],
-		 ~(1ULL << bit_idx));
-
-	usage = atomic_fetch_sub(&slab->usage[page_idx], 1U);
-	if (old_usage == slab->max_slots) {
-		atomic_fetch_and(&slab->full_page_bitmap, ~(1ULL << page_idx));
-	}
-}
-
-/*
- * bmslab_destroy - Release the slab and its 64-page allocation
- * @slab: pointer tl bmslab structure
+ * bmslab_destroy - fress the bmslab
+ * @slab: pointer to bmslab
  */
 void bmslab_destroy(struct bmslab *slab)
 {
 	if (slab == NULL)
 		return;
 
+	free(slab->bitmaps);
 	free(slab->base_addr);
 	free(slab);
 }
+
+/*
+ * murmurhash32 - small MurmurHash3 variant for 32-bit output
+ * @key: pointer to data to be hashed
+ * @len: length of the data (in bytes)
+ * @seed: initial seed value
+ */
+static inline uint32_t murmurhash32(const void *key, size_t len, uint32_t seed)
+{
+	const uint8_t *data = (const uint8_t *)key;
+	uint32_t h = seed;
+	const uint32_t c1 = 0xcc9e2d51;
+	const uint32_t c2 = 0x1b873593;
+	size_t i;
+
+	for (i = 0; i + 4 <= len; i += 4) {
+		uint32_t k;
+		memcpy(&k, data + i, 4);
+		k *= c1;
+		k = (k << 15) | (k >> 17);
+		k *= c2;
+		h ^= k;
+		h = (h << 13) | (h >> 19);
+		h = h * 5 + 0xe6546b64;
+	}
+
+	{
+		uint32_t k = 0;
+		int tail_len = len - i;
+
+		if (tail_len > 0) {
+			memcpy(&k, data + i, tail_len);
+			k *= c1;
+			k = (k << 15) | (k >> 17);
+			k *= c2;
+			h ^= k;
+		}
+	}
+
+	h ^= (uint32_t)len;
+	h ^= (h >> 16);
+	h *= 0x85ebca6b;
+	h ^= (h >> 13);
+	h *= 0xc2b2ae35;
+	h ^= (h >> 16);
+
+	return h;
+}
+
+/*
+ * page_start - computes the page start address
+ * @slab: pointer to bmslab
+ * @page_idx: which page
+ */
+static inline void *page_start(struct bmslab *slab, int page_idx)
+{
+	return (void *)((char *)slab->base_addr + (page_idx << PAGE_SHIFT));
+}
+
+/*
+ * bmslab_alloc - allocate one object from bmslab
+ * @slab: pointer to bmslab
+ *
+ * We pick a random start page index, then iterate all pages, scanning submaps
+ * also with a hashed start index.
+ *
+ * If we find a free bit (0), we set it to 1 with a CAS. On success, compute the
+ * slot index => pointer and return.
+ *
+ * If we exhaust all pages without success, return NULL.
+ */
+void *bmslab_alloc(struct bmslab *slab)
+{
+	int page_start_idx, page_idx, submap_start_idx, submap_idx;
+	int slot_idx, bit_idx;
+	uint32_t oldv, newv;
+	void *sp;
+
+	if (slab == NULL)
+		return NULL;
+
+	sp = __builtin_frame_address(0);
+
+	page_start_idx = murmurhash32(&sp, sizeof(sp), 0) % slab->page_count;
+	
+	for (int i = 0; i < slab->page_count; i++) {
+		page_idx = (page_start_idx + i) % slab->page_count;
+		submap_start_idx = murmurhash32(&sp, sizeof(sp), 1) % 16;
+
+		for (int sub_i = 0; sub_i < 16; sub_i++) {
+			submap_idx = (submap_start_idx + sub_i) % 16;
+			oldv = atomic_load(&slab->bitmaps[page_idx].submap[submap_idx]);
+
+			/* Move to the next submap */
+			if (oldv == 0xFFFFFFFFU)
+				continue;
+
+			bit_idx = __builtin_ctz(~oldv);
+			if (bit_idx < 0 || bit_idx >= 32)
+				continue;
+
+			newv = oldv | (1U << bit_idx);
+			if (atomic_compare_exchange_weak(
+					&slab->bitmaps[page_idx].submap[submap_idx],
+					&oldv, newv)) {
+				slot_idx = submap_idx * 32 + bit_idx;
+				assert(slot_idx < slab->real_slot_count);
+
+				return (void *)((char *)page_start(slab, page_idx)
+					+ slot_idx * slab->obj_size);
+			}
+		}
+	}
+
+	return NULL;
+}
+
+/*
+ * bmslab_free - frees an object pointer
+ * @slab: pointer to bmslab
+ * @ptr: object pointer to free
+ *
+ * We compute page_idx from (ptr - slab->base_addr) >> PAGE_SHIFT, then slot_idx
+ * from ((ptr - page_start) / obj_size).
+ *
+ * The submap index is (slot_idx / 32), bit index is (slot_idx % 32). Clear this
+ * bit (1->0) with fetch_and.
+ */
+void bmslab_free(struct bmslab *slab, void *ptr)
+{
+	uintptr_t base, diff, page_base;
+	int page_idx, submap_idx, slot_idx, bit_idx;
+	size_t offset;
+
+	if (slab == NULL || ptr == NULL)
+		return;
+
+	base = (uintptr_t)slab->base_addr;
+	diff = (uintptr_t)ptr - base;
+
+	page_idx = diff >> PAGE_SHIFT;
+	if (page_idx >= slab->page_count) {
+		fprintf(stderr, "bmslab_free: invalid page_idx\n");
+		return;
+	}
+
+	page_base = base + (page_idx << PAGE_SHIFT);
+	offset = (uintptr_t)ptr - page_base;
+
+	slot_idx = (int)(offset / slab->obj_size);
+	assert(slot_idx < slab->real_slot_count);
+
+	submap_idx = slot_idx / 32;
+	bit_idx = slot_idx % 32;
+
+	atomic_fetch_and(&slab->bitmaps[page_idx].submap[submap_idx],
+		~(1U << bit_idx));
+}
+
+
+
+
+
