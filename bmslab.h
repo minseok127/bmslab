@@ -1,6 +1,8 @@
 #ifndef BMSLAB_H
 #define BMSLAB_H
 
+#include <stddef.h>
+
 typedef struct bmslab bmslab_t;
 
 bmslab_t *bmslab_init(size_t obj_size);
