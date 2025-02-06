@@ -165,7 +165,7 @@ move_next_page:
 	if (not_full_page_mask == 0ULL)
 		return NULL;
 
-	/* Find first bit=1 (non-full page) */
+	/* Find first non-fulled page */
 	page_idx = __builtin_ctzll(not_full_page_mask);
 	assert(page_idx >= 0 && page_idx < 64);
 
