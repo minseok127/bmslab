@@ -214,7 +214,7 @@ static inline void *page_start(struct bmslab *slab, int page_idx)
  */
 static inline int get_max_slot_count(struct bmslab *slab)
 {
-	return slab->phys_page_count * slab->slot_count_per_page;
+	return atomic_load(&slab->phys_page_count) * slab->slot_count_per_page;
 }
 
 /*
