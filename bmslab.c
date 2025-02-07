@@ -212,7 +212,7 @@ static inline void *page_start(struct bmslab *slab, int page_idx)
  * get_max_slot_count - computes the maximum slots currently accessible
  * @slab: pointer to bmslab
  */
-static inline int get_max_slot_count(struct bmslab *slab)
+static inline uint32_t get_max_slot_count(struct bmslab *slab)
 {
 	return atomic_load(&slab->phys_page_count) * slab->slot_count_per_page;
 }
@@ -227,9 +227,9 @@ static inline int get_max_slot_count(struct bmslab *slab)
  * exceeding the user-defined memory limit.
  */
 static void adapt_phys_page_count(struct bmslab *slab,
-	int prev_allocated_slot_count)
+	uint32_t prev_allocated_slot_count)
 {
-	int max_slot_count = get_max_slot_count(slab);
+	uint32_t max_slot_count = get_max_slot_count(slab);
 	uint32_t expected = 0;
 
 	if (prev_allocated_slot_count != PAGE_EXPAND_THESHOLD(max_slot_count))
