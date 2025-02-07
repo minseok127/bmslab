@@ -14,6 +14,8 @@
 
 #define SUBMAP_COUNT	(16)
 
+_Thread_local static uint32_t tls_murmur_seed = 0;
+
 /*
  * bmslab_bitmap - per-page bitmap
  * @submap: 16 arrays of 32-bit bitmaps (each = 4 bytes)
@@ -218,13 +220,15 @@ void *bmslab_alloc(struct bmslab *slab)
 	sp = __builtin_frame_address(0);
 
 	/* Distribute the cache-lines where CAS will be used */
-	page_start_idx = murmurhash32(&sp, sizeof(sp), 0) % slab->page_count;
+	page_start_idx
+		= murmurhash32(&sp, sizeof(sp), tls_murmur_seed++) % slab->page_count;
 	
 	for (int i = 0; i < slab->page_count; i++) {
 		page_idx = (page_start_idx + i) % slab->page_count;
 
 		/* Distribute the addresses within the cache-line */
-		submap_start_idx = murmurhash32(&sp, sizeof(sp), 1) % SUBMAP_COUNT;
+		submap_start_idx
+			= murmurhash32(&sp, sizeof(sp), tls_murmur_seed++) % SUBMAP_COUNT;
 
 		for (int sub_i = 0; sub_i < SUBMAP_COUNT; sub_i++) {
 			submap_idx = (submap_start_idx + sub_i) % SUBMAP_COUNT;
