@@ -220,19 +220,18 @@ static inline uint32_t get_max_slot_count(struct bmslab *slab)
 /*
  * adapt_phys_page_count - expand physical page count if needed
  * @slab: pointer to bmslab
- * @prev_allocated_slot_count: result of atomic_add(allocated_slot_count)
  *
  * Gradully increase the number of physical pages when slot usage exceeds the
  * threshold, but ensure that only one thread performs this operation to prevent
  * exceeding the user-defined memory limit.
  */
-static void adapt_phys_page_count(struct bmslab *slab,
-	uint32_t prev_allocated_slot_count)
+static void adapt_phys_page_count(struct bmslab *slab)
 {
+	uint32_t slot_count = atomic_load(&slab->allocated_slot_count);
 	uint32_t max_slot_count = get_max_slot_count(slab);
 	uint32_t expected = 0;
 
-	if (prev_allocated_slot_count >= PAGE_EXPAND_THESHOLD(max_slot_count))
+	if (slot_count >= PAGE_EXPAND_THESHOLD(max_slot_count))
 		return;
 
 	if (!atomic_compare_exchange_weak(&slab->phys_page_expand_flag,
@@ -313,8 +312,8 @@ retry:
 				 * Increase the global allocated slot counter and expand the
 				 * number of physical page if needed.
 				 */
-				adapt_phys_page_count(slab,
-					atomic_fetch_add(&slab->allocated_slot_count, 1U));
+				atomic_fetch_add(&slab->allocated_slot_count, 1U);
+				adapt_phys_page_count(slab);
 
 				return (void *)((char *)page_start(slab, page_idx)
 					+ slot_idx * slab->obj_size);
@@ -324,7 +323,7 @@ retry:
 
 	if (atomic_load(&slab->phys_page_count)
 		< atomic_load(&slab->virt_page_count)) {
-		adapt_phys_page_count(slab, atomic_load(&slab->allocated_slot_count));
+		adapt_phys_page_count(slab);
 		goto retry;
 	}
 
