@@ -4,7 +4,7 @@ Bitmap based slab allocator
 - wait-free deallocation
 - cache line distribution
 
-Note: the object size must be (8 <= and 4096 >=), page size is 4096.
+Note: the object size must be (8<= and <=4096), page size is 4096.
 
 ## build
 ```
