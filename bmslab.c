@@ -219,7 +219,7 @@ void *bmslab_alloc(struct bmslab *slab)
 
 	sp = __builtin_frame_address(0);
 
-	/* Distribute the cache-lines where CAS will be used */
+	/* Distribute the cache-lines */
 	page_start_idx
 		= murmurhash32(&sp, sizeof(sp), tls_murmur_seed++) % slab->page_count;
 	
