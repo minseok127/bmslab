@@ -51,8 +51,8 @@ struct bmslab {
  * Returns pointer to a bmslab on sucess, or NULL on failure.
  *
  * We compute how many slots actually fit (PAGE_SIZE / obj_siz), capped at 512.
- * Then we mark only those bits as (0 => free), the rest as (1 => unused) for
- * simple exception handling.
+ * Then we mark only those bits as (0 => free), the rest as (1 => unavailable)
+ * for simple exception handling.
  */
 struct bmslab *bmslab_init(int obj_size, int page_count)
 {
