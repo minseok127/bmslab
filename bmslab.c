@@ -323,8 +323,10 @@ retry:
 	}
 
 	if (atomic_load(&slab->phys_page_count)
-		< atomic_load(&slab->virt_page_count))
+		< atomic_load(&slab->virt_page_count)) {
+		adapt_phys_page_count(slab, atomic_load(&slab->allocated_slot_count));
 		goto retry;
+	}
 
 	return NULL;
 }
