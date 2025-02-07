@@ -87,10 +87,10 @@ struct bmslab *bmslab_init(int obj_size, int max_page_count)
 	}
 
 	atomic_store(&slab->phys_page_expand_flag, 0);
+	atomic_store(&slab->virt_page_count, max_page_count);
+	atomic_store(&slab->phys_page_count, 1); /* initial page usage */
+	atomic_store(&slab->allocated_slot_count, 0);
 
-	slab->virt_page_count = max_page_count;
-	slab->phys_page_count = 1; /* initial page usage */
-	slab->allocated_slot_count = 0;
 	slab->obj_size = obj_size;
 	slab->slot_count_per_page = PAGE_SIZE / obj_size;
 
