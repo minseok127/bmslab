@@ -197,8 +197,8 @@ static inline void *page_start(struct bmslab *slab, int page_idx)
  * bmslab_alloc - allocate one object from bmslab
  * @slab: pointer to bmslab
  *
- * We use hashing to randomly determine both the page index and submap index,
- * preventing CAS operations from concentrating on a single address.
+ * We use hashing to randomly determine both the page index and submap index to
+ * reduce CAS contention.
  *
  * If we find a free bit (0), we set it to 1 with a CAS. On success, compute the
  * slot index => pointer and return.
