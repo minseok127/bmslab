@@ -276,6 +276,8 @@ void *bmslab_alloc(struct bmslab *slab)
 		return NULL;
 
 	sp = __builtin_frame_address(0);
+	
+retry:
 
 	/* Distribute the cache-lines */
 	page_start_idx = murmurhash32(&sp, sizeof(sp), tls_murmur_seed++)
@@ -319,6 +321,10 @@ void *bmslab_alloc(struct bmslab *slab)
 			}
 		}
 	}
+
+	if (atomic_load(&slab->phys_page_count)
+		< atomic_load(&slab->virt_page_count))
+		goto retry;
 
 	return NULL;
 }
