@@ -232,7 +232,7 @@ static void adapt_phys_page_count(struct bmslab *slab,
 	uint32_t max_slot_count = get_max_slot_count(slab);
 	uint32_t expected = 0;
 
-	if (prev_allocated_slot_count != PAGE_EXPAND_THESHOLD(max_slot_count))
+	if (prev_allocated_slot_count >= PAGE_EXPAND_THESHOLD(max_slot_count))
 		return;
 
 	if (!atomic_compare_exchange_weak(&slab->phys_page_expand_flag,
