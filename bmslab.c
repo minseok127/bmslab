@@ -36,7 +36,7 @@ struct bmslab_bitmap {
  * @virt_page_count: number of virtual pages
  * @phys_page_count: number of physical pages
  * @allocated_slot_count: global count of allocated slots
- * @phys_page_extend_flag: flag to enable only one thread to control page count
+ * @phys_page_expand_flag: flag to enable only one thread to control page count
  * @slot_count_per_page: number of valid slots per page
  * @obj_size: size of each object
  * @base_addr: base address of the contiguos pages
@@ -46,7 +46,7 @@ struct bmslab {
 	uint32_t virt_page_count;
 	uint32_t phys_page_count;
 	uint32_t allocated_slot_count;
-	uint32_t phys_page_extend_flag;
+	uint32_t phys_page_expand_flag;
 	uint32_t slot_count_per_page;
 	uint32_t obj_size;
 	void *base_addr;
@@ -86,7 +86,7 @@ struct bmslab *bmslab_init(int obj_size, int max_page_count)
 		return NULL;
 	}
 
-	atomic_store(&slab->phys_page_extend_flag, 0);
+	atomic_store(&slab->phys_page_expand_flag, 0);
 
 	slab->virt_page_count = max_page_count;
 	slab->phys_page_count = 1; /* initial page usage */
@@ -218,7 +218,7 @@ static inline int get_max_slot_count(struct bmslab *slab)
 }
 
 /*
- * adapt_phys_page_count - extend physical page count if needed
+ * adapt_phys_page_count - expand physical page count if needed
  * @slab: pointer to bmslab
  * @prev_allocated_slot_count: result of atomic_add(allocated_slot_count)
  *
@@ -235,7 +235,7 @@ static void adapt_phys_page_count(struct bmslab *slab,
 	if (prev_allocated_slot_count != PAGE_EXPAND_THESHOLD(max_slot_count))
 		return;
 
-	if (!atomic_compare_exchange_weak(&slab->phys_page_extend_flag,
+	if (!atomic_compare_exchange_weak(&slab->phys_page_expand_flag,
 			&expected, 1))
 		return;	
 
@@ -244,8 +244,8 @@ static void adapt_phys_page_count(struct bmslab *slab,
 		atomic_fetch_add(&slab->phys_page_count, 1U);
 	}
 
-	assert(atomic_load(&slab->phys_page_extend_flag) == 1);
-	atomic_store(&slab->phys_page_extend_flag, 0);
+	assert(atomic_load(&slab->phys_page_expand_flag) == 1);
+	atomic_store(&slab->phys_page_expand_flag, 0);
 }
 
 /*
@@ -308,7 +308,7 @@ void *bmslab_alloc(struct bmslab *slab)
 				assert(slot_idx < slab->slot_count_per_page);
 
 				/*
-				 * Increase the global allocated slot counter and extend the
+				 * Increase the global allocated slot counter and expand the
 				 * number of physical page if needed.
 				 */
 				adapt_phys_page_count(slab,
