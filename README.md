@@ -1,5 +1,5 @@
 ## bmslab
-Bitmap based slab allocator
+Bitmap based slab allocator.
 - lock-free allocation
 - wait-free deallocation
 - cacheline distribution
