@@ -262,7 +262,7 @@ void *bmslab_alloc(struct bmslab *slab)
  * We compute page_idx from (ptr - slab->base_addr) >> PAGE_SHIFT, then slot_idx
  * from ((ptr - page_start) / obj_size).
  *
- * The submap index is (slot_idx / 32), bit index is (slot_idx % 32). Clear this
+ * The submap index is (slot_idx % 16), bit index is (slot_idx / 16). Clear this
  * bit (1->0) with fetch_and.
  */
 void bmslab_free(struct bmslab *slab, void *ptr)
