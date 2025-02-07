@@ -217,13 +217,13 @@ void *bmslab_alloc(struct bmslab *slab)
 
 	sp = __builtin_frame_address(0);
 
-	/* Distribute the cache lines where CAS will be used */
+	/* Distribute the cache-lines where CAS will be used */
 	page_start_idx = murmurhash32(&sp, sizeof(sp), 0) % slab->page_count;
 	
 	for (int i = 0; i < slab->page_count; i++) {
 		page_idx = (page_start_idx + i) % slab->page_count;
 
-		/* Distribute the addresses within the cahce line */
+		/* Distribute the addresses within the cache-line */
 		submap_start_idx = murmurhash32(&sp, sizeof(sp), 1) % SUBMAP_COUNT;
 
 		for (int sub_i = 0; sub_i < SUBMAP_COUNT; sub_i++) {
