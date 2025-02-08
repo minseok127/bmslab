@@ -8,7 +8,7 @@
 #define PAGE_SIZE	(4096)
 #define PAGE_SHIFT	(12)
 
-#define PAGE_EXPAND_THESHOLD(page_count) (page_count >> 1)
+#define PAGE_EXPAND_THRESHOLD(page_count) (page_count >> 1)
 
 #ifndef __cacheline_aligned
 #define __cacheline_aligned __attribute__((aligned(64)))
@@ -231,7 +231,7 @@ static void adapt_phys_page_count(struct bmslab *slab)
 	uint32_t max_slot_count = get_max_slot_count(slab);
 	uint32_t expected = 0;
 
-	if (slot_count >= PAGE_EXPAND_THESHOLD(max_slot_count))
+	if (slot_count < PAGE_EXPAND_THRESHOLD(max_slot_count))
 		return;
 
 	if (!atomic_compare_exchange_weak(&slab->phys_page_expand_flag,
