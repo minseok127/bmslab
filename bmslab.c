@@ -341,10 +341,10 @@ static void adaptive_phys_page_shrink(struct bmslab *slab)
 static bool try_ref_page(struct bmslab *slab, int page_idx)
 {
 	uint64_t page_lock_ref
-		= atomic_fetch_add(&slab->page_lock_refs[page_idx], 1);
+		= atomic_fetch_add(&slab->page_lock_refs[page_idx], 1U);
 
 	if (IS_PAGE_LOCKED(page_lock_ref)) {
-		atomic_fetch_sub(&slab->page_lock_refs[page_idx], 1);
+		atomic_fetch_sub(&slab->page_lock_refs[page_idx], 1U);
 		return false;
 	}
 
@@ -427,6 +427,9 @@ retry:
 					+ slot_idx * slab->obj_size);
 			}
 		}
+
+		/* Move to the next page */
+		atomic_fetch_sub(&slab->page_lock_refs[page_idx], 1U);
 	}
 
 	if (atomic_load(&slab->phys_page_count)
