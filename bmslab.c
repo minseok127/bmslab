@@ -310,7 +310,6 @@ static void adaptive_phys_page_shrink(struct bmslab *slab)
 	atomic_thread_fence(memory_order_seq_cst);
 
 	page_lock_ref = atomic_load(&slab->page_lock_refs[last_page_idx]);
-
 	if (is_page_reclaimable(page_lock_ref)) {
 		/*
 		 * At this point, no new threads can allocate slots on this page, and
