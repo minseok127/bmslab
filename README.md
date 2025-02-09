@@ -1,4 +1,4 @@
-## bmslab
+## BMSLAB
 Bitmap based slab allocator.
 - lock-free allocation
 - wait-free deallocation
