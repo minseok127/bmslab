@@ -161,6 +161,7 @@ void bmslab_destroy(struct bmslab *slab)
 	if (slab == NULL)
 		return;
 
+	free(slab->page_lock_refs);
 	free(slab->bitmaps);
 	free(slab->base_addr);
 	free(slab);
