@@ -18,7 +18,7 @@
 #define PAGE_SHIFT	(12)
 
 #define PAGE_EXPAND_THRESHOLD(max_page_cnt) (max_page_cnt >> 1)
-#define PAGE_SHRINK_THRESHOLD(max_page_cnt) (max_page_cnt >> 2)
+#define PAGE_SHRINK_THRESHOLD(max_page_cnt) (max_page_cnt >> 3)
 
 #define PAGE_LOCK_MASK (0x8000000000000000ULL)
 #define IS_PAGE_LOCKED(page_lock_ref) ((page_lock_ref) & PAGE_LOCK_MASK)
