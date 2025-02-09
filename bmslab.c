@@ -37,31 +37,31 @@ _Thread_local static uint32_t tls_murmur_seed = 0;
  * Total capacity per page = 16 * 32 = 512 slots (max).
  */
 struct bmslab_bitmap {
-	uint32_t submap[SUBMAP_COUNT];
+	_Atomic uint32_t submap[SUBMAP_COUNT];
 } __cacheline_aligned;
 
 /*
  * bmslab - top-level structure
- * @virt_page_count: number of virtual pages
- * @phys_page_count: number of physical pages
+ * @page_lock_refs: array of lock bit and reference count for each page
  * @allocated_slot_count: global count of allocated slots
  * @phys_page_count_flag: flag to enable only one thread to control page count
+ * @phys_page_count: number of physical pages
+ * @virt_page_count: number of virtual pages
  * @slot_count_per_page: number of valid slots per page
  * @obj_size: size of each object
  * @base_addr: base address of the contiguos pages
  * @bitmaps: array of bmslab_bitmap, each describing one page's submaps
- * @page_lock_refs: array of lock bit and reference count for each page
  */
 struct bmslab {
+	_Atomic uint64_t *page_lock_refs;
+	_Atomic uint32_t allocated_slot_count;
+	_Atomic uint32_t phys_page_count_flag;
+	_Atomic uint32_t phys_page_count;
 	uint32_t virt_page_count;
-	uint32_t phys_page_count;
-	uint32_t allocated_slot_count;
-	uint32_t phys_page_count_flag;
 	uint32_t slot_count_per_page;
 	uint32_t obj_size;
 	void *base_addr;
 	struct bmslab_bitmap *bitmaps;
-	uint64_t *page_lock_refs;
 };
 
 /*
