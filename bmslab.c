@@ -8,7 +8,7 @@
 #define PAGE_SIZE	(4096)
 #define PAGE_SHIFT	(12)
 
-#define PAGE_EXPAND_THRESHOLD(page_count) (page_count >> 1)
+#define PAGE_EXPAND_THRESHOLD(max_page_count) (max_page_count >> 1)
 
 #ifndef __cacheline_aligned
 #define __cacheline_aligned __attribute__((aligned(64)))
