@@ -7,7 +7,7 @@ Bitmap based slab allocator.
 
 Note: the object size must be (8<= and <=4096), page size is 4096.
 
-## build
+## Build
 ```
 $ git clone https://github.com/minseok127/bmslab.git
 $ cd bmslab
@@ -23,7 +23,7 @@ void bmslab_free(bmslab_t *slab, void *ptr);
 void bmslab_destroy(bmslab_t *slab);
 ```
 
-## usage
+## Usage
 The user calls bmslab_init to obtain a bmslab structure. This initialization function takes the byte size of objects to be allocated and the maximum number of pages the slab can use. The maximum page count represents the virtual memory limit, while the actual number of physical pages is adjusted gradually based on slab usage.
 
 Objects are allocated with bmslab_alloc, and pointers obtained through it must be returned to the slab using bmslab_free. Once the slab is no longer needed, bmslab_destroy should be called to release the bmslab structure.
