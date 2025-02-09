@@ -163,7 +163,7 @@ void bmslab_destroy(struct bmslab *slab)
 
 	free(slab->page_lock_refs);
 	free(slab->bitmaps);
-	free(slab->base_addr);
+	munmap(slab->base_addr, slab->virt_page_count * PAGE_SIZE);
 	free(slab);
 }
 
