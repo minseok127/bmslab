@@ -1,20 +1,29 @@
+#define _GNU_SOURCE
+#include <sys/mman.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <string.h>
+#include <stdbool.h>
 #include <stdatomic.h>
+
+#include <string.h>
 #include <assert.h>
-
-#define PAGE_SIZE	(4096)
-#define PAGE_SHIFT	(12)
-
-#define PAGE_EXPAND_THRESHOLD(max_page_count) (max_page_count >> 1)
 
 #ifndef __cacheline_aligned
 #define __cacheline_aligned __attribute__((aligned(64)))
 #endif /* __cacheline_aligned */
 
-#define SUBMAP_COUNT	(16)
+#define PAGE_SIZE	(4096)
+#define PAGE_SHIFT	(12)
+
+#define PAGE_EXPAND_THRESHOLD(max_page_cnt) (max_page_cnt >> 1)
+#define PAGE_SHRINK_THRESHOLD(max_page_cnt) (max_page_cnt >> 2)
+
+#define PAGE_LOCK_MASK (0x8000000000000000ULL)
+#define IS_PAGE_LOCKED(page_lock_ref) ((page_lock_ref) & PAGE_LOCK_MASK)
+
+#define SUBMAP_COUNT (16)
 
 _Thread_local static uint32_t tls_murmur_seed = 0;
 
@@ -36,21 +45,23 @@ struct bmslab_bitmap {
  * @virt_page_count: number of virtual pages
  * @phys_page_count: number of physical pages
  * @allocated_slot_count: global count of allocated slots
- * @phys_page_expand_flag: flag to enable only one thread to control page count
+ * @phys_page_count_flag: flag to enable only one thread to control page count
  * @slot_count_per_page: number of valid slots per page
  * @obj_size: size of each object
  * @base_addr: base address of the contiguos pages
  * @bitmaps: array of bmslab_bitmap, each describing one page's submaps
+ * @page_lock_refs: array of lock bit and reference count for each page
  */
 struct bmslab {
 	uint32_t virt_page_count;
 	uint32_t phys_page_count;
 	uint32_t allocated_slot_count;
-	uint32_t phys_page_expand_flag;
+	uint32_t phys_page_count_flag;
 	uint32_t slot_count_per_page;
 	uint32_t obj_size;
 	void *base_addr;
 	struct bmslab_bitmap *bitmaps;
+	uint64_t *page_lock_refs;
 };
 
 /*
@@ -86,7 +97,7 @@ struct bmslab *bmslab_init(int obj_size, int max_page_count)
 		return NULL;
 	}
 
-	atomic_store(&slab->phys_page_expand_flag, 0);
+	atomic_store(&slab->phys_page_count_flag, 0);
 	atomic_store(&slab->virt_page_count, max_page_count);
 	atomic_store(&slab->phys_page_count, 1); /* initial page usage */
 	atomic_store(&slab->allocated_slot_count, 0);
@@ -94,22 +105,27 @@ struct bmslab *bmslab_init(int obj_size, int max_page_count)
 	slab->obj_size = obj_size;
 	slab->slot_count_per_page = PAGE_SIZE / obj_size;
 
-#ifdef _ISOC11_SOURCE
-	slab->base_addr = aligned_alloc(PAGE_SIZE,
-		slab->virt_page_count * PAGE_SIZE);
-#else /* !_ISOC11_SOURCE */
-	if (posix_memalign(&slab->base_addr, PAGE_SIZE,
-			slab->virt_page_count * PAGE_SIZE) != 0) {
-		fprintf(stderr, "bmslab_init: posix_memalgin failed\n");
+	slab->bitmaps = calloc(slab->virt_page_count, sizeof(struct bmslab_bitmap));
+	if (slab->bitmaps == NULL) {
+		fprintf(stderr, "bmslab_init: slab->bitmaps allocation failed\n");
 		free(slab);
 		return NULL;
 	}
-#endif /* _ISOC11_SOURCE */
 
-	slab->bitmaps = calloc(slab->virt_page_count, sizeof(struct bmslab_bitmap));
-	if (slab->bitmaps == NULL) {
-		fprintf(stderr, "bmslab_init: slab->bitmap allocation failed\n");
-		free(slab->base_addr);
+	slab->page_lock_refs = calloc(slab->virt_page_count, sizeof(uint64_t));
+	if (slab->page_lock_refs == NULL) {
+		fprintf(stderr, "bmslab_init: slab->page_lock_refs allocation failed\n");
+		free(slab->bitmaps);
+		free(slab);
+		return NULL;
+	}
+
+	slab->base_addr = mmap(NULL, slab->virt_page_count * PAGE_SIZE,
+		PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (slab->base_addr == MAP_FAILED) {
+		fprintf(stderr, "bmslab_init: slab->base_addr allocation failed\n");
+		free(slab->bitmaps);
+		free(slab->page_lock_refs);
 		free(slab);
 		return NULL;
 	}
@@ -198,53 +214,141 @@ static inline uint32_t murmurhash32(const void *key, size_t len, uint32_t seed)
 	return h;
 }
 
-/*
- * page_start - computes the page start address
- * @slab: pointer to bmslab
- * @page_idx: which page
- */
 static inline void *page_start(struct bmslab *slab, int page_idx)
 {
 	return (void *)((char *)slab->base_addr + (page_idx << PAGE_SHIFT));
 }
 
-/*
- * get_max_slot_count - computes the maximum slots currently accessible
- * @slab: pointer to bmslab
- */
 static inline uint32_t get_max_slot_count(struct bmslab *slab)
 {
 	return atomic_load(&slab->phys_page_count) * slab->slot_count_per_page;
 }
 
+static inline void lock_page(struct bmslab *slab, int page_idx)
+{
+	atomic_fetch_or(&slab->page_lock_refs[page_idx], PAGE_LOCK_MASK);
+}
+
+static inline void unlock_page(struct bmslab *slab, int page_idx)
+{
+	atomic_fetch_and(&slab->page_lock_refs[page_idx], ~PAGE_LOCK_MASK);
+}
+
+static inline bool is_page_reclaimable(uint64_t page_lock_ref)
+{
+	return (page_lock_ref == PAGE_LOCK_MASK);
+}
+
 /*
- * adapt_phys_page_count - expand physical page count if needed
+ * adaptive_phys_page_expand - expand physical page count if needed
  * @slab: pointer to bmslab
  *
- * Gradully increase the number of physical pages when slot usage exceeds the
+ * Gradually increase the number of physical pages when slot usage exceeds the
  * threshold, but ensure that only one thread performs this operation to prevent
  * exceeding the user-defined memory limit.
  */
-static void adapt_phys_page_count(struct bmslab *slab)
+static void adaptive_phys_page_expand(struct bmslab *slab)
 {
 	uint32_t slot_count = atomic_load(&slab->allocated_slot_count);
 	uint32_t max_slot_count = get_max_slot_count(slab);
 	uint32_t expected = 0;
+	int new_page_idx;
 
 	if (slot_count < PAGE_EXPAND_THRESHOLD(max_slot_count))
 		return;
 
-	if (!atomic_compare_exchange_weak(&slab->phys_page_expand_flag,
+	if (!atomic_compare_exchange_weak(&slab->phys_page_count_flag,
 			&expected, 1))
 		return;	
 
 	if (atomic_load(&slab->phys_page_count)
 			< atomic_load(&slab->virt_page_count)) {
-		atomic_fetch_add(&slab->phys_page_count, 1U);
+		new_page_idx = atomic_fetch_add(&slab->phys_page_count, 1U);
+		unlock_page(slab, new_page_idx);
 	}
 
-	assert(atomic_load(&slab->phys_page_expand_flag) == 1);
-	atomic_store(&slab->phys_page_expand_flag, 0);
+	atomic_store(&slab->phys_page_count_flag, 0);
+}
+
+/*
+ * adaptive_phys_page_shrink - shrink physical page count if needed
+ * @slab: pointer to bmslab
+ *
+ * Gradually decrease the number of physical pages when slot usage falls below
+ * the threshold.
+ *
+ * This is performed from the last physical page backward. In this process, the
+ * lock bit of page_lock_ref is set first to prevent new allocations. If the
+ * reference count also reaches zero, madvise with MADV_FREE is used to release
+ * the physical page.
+ *
+ * Use slab->phys_page_count_flag to prevent sudden fluctuations in the number
+ * of physical pages.
+ */
+static void adaptive_phys_page_shrink(struct bmslab *slab)
+{
+	uint32_t slot_count = atomic_load(&slab->allocated_slot_count);
+	uint32_t max_slot_count = get_max_slot_count(slab);
+	uint32_t expected = 0;
+	uint64_t page_lock_ref;
+	int last_page_idx;	
+
+	if (slot_count > PAGE_SHRINK_THRESHOLD(max_slot_count))
+		return;
+
+	if (!atomic_compare_exchange_weak(&slab->phys_page_count_flag,
+			&expected, 1))
+		return;	
+
+	last_page_idx = atomic_load(&slab->phys_page_count) - 1;
+	if (last_page_idx == 0) { /* do not free the first page */
+		atomic_store(&slab->phys_page_count_flag, 0);
+		return;
+	}
+
+	lock_page(slab, last_page_idx);
+	atomic_thread_fence(memory_order_seq_cst);
+
+	page_lock_ref = atomic_load(&slab->page_lock_refs[last_page_idx]);
+
+	if (is_page_reclaimable(page_lock_ref)) {
+		/*
+		 * At this point, no new threads can allocate slots on this page, and
+		 * all currently allocated slots have been returned.
+		 *
+		 * Applying the MADV_FREE flag allows the physical memory of this page
+		 * to be freed when memory pressure occurs. Note that if the page is
+		 * accessed before being freed, a write operation will cancle the
+		 * MADV_FREE status.
+		 */
+		madvise(page_start(slab, last_page_idx), PAGE_SIZE, MADV_FREE);
+		atomic_fetch_sub(&slab->phys_page_count, 1U);
+	}
+
+	atomic_store(&slab->phys_page_count_flag, 0);
+}
+
+/*
+ * try_ref_page - try to reference the given page
+ * @slab: pointer to bmslab
+ * @page_idx: target page index
+ *
+ * Increase the reference counter of the given page
+ * (slab->page_lock_refs[page_idx]).
+ *
+ * If the page was locked, return false. Otherwise return true.
+ */
+static bool try_ref_page(struct bmslab *slab, int page_idx)
+{
+	uint64_t page_lock_ref
+		= atomic_fetch_add(&slab->page_lock_refs[page_idx], 1);
+
+	if (IS_PAGE_LOCKED(page_lock_ref)) {
+		atomic_fetch_sub(&slab->page_lock_refs[page_idx], 1);
+		return false;
+	}
+
+	return true;
 }
 
 /*
@@ -285,6 +389,10 @@ retry:
 	for (uint32_t i = 0; i < slab->phys_page_count; i++) {
 		page_idx = (page_start_idx + i) % slab->phys_page_count;
 
+		/* If this page is locked, move to the next page */
+		if (!try_ref_page(slab, page_idx))
+			continue;
+
 		/* Distribute the addresses within the cache-line */
 		submap_start_idx
 			= murmurhash32(&sp, sizeof(sp), tls_murmur_seed++) % SUBMAP_COUNT;
@@ -313,7 +421,7 @@ retry:
 				 * number of physical page if needed.
 				 */
 				atomic_fetch_add(&slab->allocated_slot_count, 1U);
-				adapt_phys_page_count(slab);
+				adaptive_phys_page_expand(slab);
 
 				return (void *)((char *)page_start(slab, page_idx)
 					+ slot_idx * slab->obj_size);
@@ -323,7 +431,7 @@ retry:
 
 	if (atomic_load(&slab->phys_page_count)
 		< atomic_load(&slab->virt_page_count)) {
-		adapt_phys_page_count(slab);
+		adaptive_phys_page_expand(slab);
 		goto retry;
 	}
 
@@ -372,6 +480,10 @@ void bmslab_free(struct bmslab *slab, void *ptr)
 		~(1U << bit_idx));
 
 	atomic_fetch_sub(&slab->allocated_slot_count, 1U);
+
+	atomic_fetch_sub(&slab->page_lock_refs[page_idx], 1);
+
+	adaptive_phys_page_shrink(slab);
 }
 
 
