@@ -465,7 +465,7 @@ void bmslab_free(struct bmslab *slab, void *ptr)
 	diff = (uintptr_t)ptr - base;
 
 	page_idx = diff >> PAGE_SHIFT;
-	if (page_idx >= slab->phys_page_count) {
+	if (page_idx >= slab->virt_page_count) {
 		fprintf(stderr, "bmslab_free: invalid page_idx\n");
 		return;
 	}
