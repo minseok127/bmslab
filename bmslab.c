@@ -1,3 +1,32 @@
+/*
+ * bmslab: A Multithreaded Memory Slab Allocator
+ *
+ * This code implements a slab allocator (bmslab) designed for managing fixed-size
+ * objects in a multithreaded environment. The allocator organizes memory into pages,
+ * each subdivided into slots tracked by a per-page bitmap.
+ *
+ * Key features include:
+ *
+ * 1. Memory Management:
+ *    - Memory is allocated in pages using mmap.
+ *    - Each page is divided into a number of fixed-size slots, determined by PAGE_SIZE
+ *      divided by the object size (obj_size), with a maximum of 512 slots per page.
+ *
+ * 2. Bitmap Tracking:
+ *    - Each page contains 16 submaps (arrays of 32-bit integers), where each bit
+ *      represents a slot (0 indicates free, 1 indicates used).
+ *
+ * 3. Dynamic Physical Page Expansion and Shrinkage:
+ *    - When the allocated slot count exceeds a predefined threshold (PAGE_EXPAND_THRESHOLD),
+ *      adaptive_phys_page_expand() adds a new physical page.
+ *    - When usage drops below a threshold (PAGE_SHRINK_THRESHOLD), adaptive_phys_page_shrink()
+ *      attempts to free the last physical page.
+ *
+ * 4. Randomized Allocation:
+ *    - The allocator uses a variant of the MurmurHash3 (murmurhash32) to distribute
+ *      allocation attempts across pages and submaps, reducing contention.
+ */
+
 #define _GNU_SOURCE
 #include <sys/mman.h>
 
