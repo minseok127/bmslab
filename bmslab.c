@@ -10,6 +10,8 @@
 #include <string.h>
 #include <assert.h>
 
+#include "bmslab.h"
+
 #ifndef __cacheline_aligned
 #define __cacheline_aligned __attribute__((aligned(64)))
 #endif /* __cacheline_aligned */
