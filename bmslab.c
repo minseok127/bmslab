@@ -1,5 +1,5 @@
 /*
- * bmslab: A Multithreaded Memory Slab Allocator
+ * bmslab: A Multithreaded Bitmap based Slab Allocator
  *
  * This code implements a slab allocator (bmslab) designed for managing fixed-size
  * objects in a multithreaded environment. The allocator organizes memory into pages,
