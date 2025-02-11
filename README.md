@@ -1,5 +1,5 @@
 # BMSLAB
-Bitmap based slab allocator. Designed for a multi-threaded environment.
+Bitmap based slab allocator, designed for a multi-threaded environment.
 - lock-free allocation
 - wait-free deallocation
 - cacheline distribution to reduce contention
