@@ -15,19 +15,3 @@ $ make
 => libbmslab.a, libbmslab.so, bmslab.h
 ```
 
-# API
-```
-bmslab_t *bmslab_init(int obj_size, int max_page_count);
-void *bmslab_alloc(bmslab_t *slab);
-void bmslab_free(bmslab_t *slab, void *ptr);
-void bmslab_destroy(bmslab_t *slab);
-```
-
-# Usage
-The user calls bmslab_init() to obtain a bmslab structure. This initialization function takes the byte size of objects to be allocated and the maximum number of pages the slab can use. The maximum page count represents the virtual memory limit, while the actual number of physical pages is adjusted gradually based on slab usage.
-
-Objects are allocated with bmslab_alloc(), and object pointers must be returned to the slab using bmslab_free(). Once the slab is no longer needed, bmslab_destroy() should be called to release the bmslab structure.
-
-# Test
-
-# Evaluation
