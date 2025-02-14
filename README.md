@@ -12,6 +12,12 @@ Note: the object size must be (8<= and <=4096), page size is 4096.
 $ git clone https://github.com/minseok127/bmslab.git
 $ cd bmslab
 $ make
-=> libbmslab.a, libbmslab.so, bmslab.h
+$ tree
+|
+-- libbmslab.a
+|
+-- libbmslab.so
+|
+-- bmslab.h
 ```
 
