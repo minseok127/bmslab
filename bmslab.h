@@ -14,6 +14,10 @@ void *bmslab_alloc(bmslab_t *slab);
 
 void bmslab_free(bmslab_t *slab, void *ptr);
 
+/* stat */
+int get_bmslab_phys_page_count(struct bmslab *slab);
+int get_bmslab_allocated_slots(struct bmslab *slab);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */

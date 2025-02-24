@@ -95,6 +95,16 @@ struct bmslab {
 	struct bmslab_bitmap *bitmaps;
 };
 
+int get_bmslab_phys_page_count(struct bmslab *slab)
+{
+	return atomic_load(&slab->phys_page_count_flag);
+}
+
+int get_bmslab_allocated_slots(struct bmslab *slab)
+{
+	return atomic_load(&slab->allocated_slot_count);
+}
+
 /*
  * bmslab_init - initializes a bmslab
  * @obj_size: size of each object (must be >= 8 and <= PAGE_SIZE)
